@@ -24,5 +24,8 @@
   "task_links": [
     {"field": "link_type", "type": "not_empty", "description": "Тип ссылки не пустой"},
     {"field": "link_url", "type": "regex", "pattern": "^https?://", "description": "URL ссылки начинается с http(s)://"}
+  ],
+  "projects": [
+    {"field": "all", "type": "all_not_empty", "description": "Все поля проекта заполнены"}
   ]
 }

@@ -58,6 +58,8 @@ def main() -> int:
     )
 
     task_ids: set[str] = set()
+    project_ids: set[str] = set()
+    project_writer = None
 
     try:
         # 1. Summary
@@ -145,8 +147,37 @@ def main() -> int:
                 continue
 
             task_writer.write(task_data)
+            if task_data.get("project_id"):
+                project_ids.add(task_data["project_id"])
             for link in links:
                 task_link_writer.write(link)
+
+        # 6. Проекты (дедупликация по project_id)
+        logger.info("Уникальных проектов: %d", len(project_ids))
+        projects = []
+        for project_id in sorted(project_ids):
+            project_url = f"{config.BASE_URL}/admin/autoreport/project/{project_id}/change/"
+            logger.info("Проект %s", project_id)
+            try:
+                project_html = client.get_html(project_url)
+                project_data = parsers.parse_project(project_html, project_url)
+            except Exception as exc:
+                logger.error("Ошибка проекта %s: %s", project_id, exc)
+                errors.append(f"project {project_id}: {exc}")
+                continue
+            projects.append(project_data)
+
+        # Поля projects.csv: объединение всех полей (project_id, name, url + остальные)
+        project_fields = ["project_id", "name", "url"]
+        for p in projects:
+            for key in p:
+                if key not in project_fields:
+                    project_fields.append(key)
+        project_writer = storage.CsvWriter(
+            os.path.join(run_dir, "projects.csv"), project_fields
+        )
+        for p in projects:
+            project_writer.write(p)
 
     finally:
         gost_writer.close()
@@ -154,6 +185,8 @@ def main() -> int:
         test_writer.close()
         task_writer.close()
         task_link_writer.close()
+        if project_writer:
+            project_writer.close()
 
     # Проверки собранных данных по правилам из checks_config.json
     try:

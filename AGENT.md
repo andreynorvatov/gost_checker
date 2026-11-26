@@ -2,7 +2,7 @@
 
 Скрипт обходит данные ГОСТ отчетов на `https://autoreportkns.mos.ru` (Django admin) и
 сохраняет их в CSV. Каждый запуск создаёт новую папку `{alias}_{quarter}_{timestamp}`
-в `output/` с 5 CSV-файлами и HTML-отчётом `report.html`.
+в `output/` с 6 CSV-файлами и HTML-отчётом `report.html`.
 
 ## Запуск
 
@@ -19,7 +19,7 @@ python3 -m venv .venv
 | [`.env`](.env) | Секреты: `COOKIE_STRING` (куки для авторизации). Не коммитится (в `.gitignore`) |
 | [`config.py`](config.py) | Константы: `BASE_URL`, параметры запроса, таймауты, ретраи; `COOKIE_STRING` читается из `.env` |
 | [`http_client.py`](http_client.py) | Сессия `requests` с куками, ретраи с backoff, `get_html(url)` |
-| [`parsers.py`](parsers.py) | Парсеры HTML: `parse_summary`, `parse_gost`, `parse_iteration`, `parse_test`, `parse_task` |
+| [`parsers.py`](parsers.py) | Парсеры HTML: `parse_summary`, `parse_gost`, `parse_iteration`, `parse_test`, `parse_task`, `parse_project` |
 | [`storage.py`](storage.py) | Папка запуска, запись CSV (utf-8-sig), поля CSV-файлов |
 | [`checks.py`](checks.py) | Проверка собранных CSV по правилам из `checks_config.json`, запись `checks.csv` (можно запускать отдельно: `python checks.py <папка>`) |
 | [`checks_config.json`](checks_config.json) | Правила проверок (JSON): сущность → список правил (поле + тип + параметры) |
@@ -28,13 +28,14 @@ python3 -m venv .venv
 | [`main.py`](main.py) | Оркестрация обхода, логирование в консоль, сводка ошибок, проверки, генерация отчёта |
 | [`requirements.txt`](requirements.txt) | Зависимости: requests, beautifulsoup4, lxml, python-dotenv |
 
-## Логика обхода (5 уровней)
+## Логика обхода (6 уровней)
 
 ```
 summary (/gost/summary/) → ГОСТ (/admin/autoreport/gostreport/<id>/change/)
   → итерация (/admin/autoreport/iteration/<id>/change/)
     → тест (/admin/autoreport/test/<id>/change/) — добираем url_preview, from_vp, to_vp
   → задача (/admin/autoreport/task/<id>/change/) — дедупликация по task_id
+    → проект (/admin/autoreport/project/<id>/change/) — дедупликация по project_id
 ```
 
 1. **Summary** — таблица `#gost-summary-table`: список ГОСТов со статистикой и ссылками.
@@ -44,6 +45,10 @@ summary (/gost/summary/) → ГОСТ (/admin/autoreport/gostreport/<id>/change/
    (остальные поля теста берутся из inline-таблицы итерации).
 5. **Задача** — форма `#task_form` + inline-ссылки `#links-group`.
    Уникальные `task_id` собираются из итераций, каждая задача обходится один раз.
+   Из поля «Проект» извлекается `project_id` (value выбранной option).
+6. **Проект** — форма проекта: все поля `.form-row.field-*` парсятся автоматически
+   (checkbox/select/textarea/readonly/input). Уникальные `project_id` собираются из задач,
+   каждый проект обходится один раз.
 
 ## Выходные CSV
 
@@ -52,10 +57,11 @@ summary (/gost/summary/) → ГОСТ (/admin/autoreport/gostreport/<id>/change/
 | `gosts.csv` | Данные ГОСТов из summary + страницы (alias, url_preview, review, version и т.д.) |
 | `iterations.csv` | Итерации: КЭ/КГ/РС/АС, результаты, узкие места, рекомендации, task_id |
 | `tests.csv` | Тесты: inline-данные + url_preview/from_vp/to_vp со страницы теста |
-| `tasks.csv` | Все поля задач (title, jira_id, status, purposes, requirements и т.д.) |
+| `tasks.csv` | Все поля задач (title, jira_id, status, purposes, requirements, project_id и т.д.) |
 | `task_links.csv` | Ссылки задач: link_type, url, description |
+| `projects.csv` | Все поля проектов (парсятся автоматически из `.form-row.field-*`) |
 | `checks.csv` | Результаты проверок: entity, entity_id, field, check_type, expected, actual, status, message, description |
-| `report.html` | Красивый HTML-отчёт со всеми данными (сводка, ГОСТы с итерациями и тестами, задачи со ссылками, секция «Проверки») |
+| `report.html` | Красивый HTML-отчёт со всеми данными (сводка, ГОСТы с итерациями и тестами, задачи со ссылками, проекты, секция «Проверки») |
 
 Все URL в CSV — полные, с доменом. Кодировка — utf-8-sig (корре��тно открывается в Excel).
 Отч��т генерируется автоматически в конце обхода; можно перегенерировать отдельно:
@@ -100,7 +106,7 @@ summary (/gost/summary/) → ГОСТ (/admin/autoreport/gostreport/<id>/change/
 
 Правила:
 - Проверяются все строки файла; `entity_id` берётся из id-поля
-  (`gost_id`, `iteration_id`, `test_id`, `task_id`, `link_id`).
+  (`gost_id`, `iteration_id`, `test_id`, `task_id`, `link_id`, `project_id`).
 - Пустое значение поля = нарушение (`fail`) для всех типов.
 - Статус: `ok` / `fail`. Нарушения не влияют на exit code (всегда 0).
 - Нет конфига или он пуст → проверки пропускаются с предупреждением,

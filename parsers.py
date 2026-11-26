@@ -364,6 +364,7 @@ def parse_task(html: str, url: str) -> tuple[dict, list[dict]]:
         "restriction": _textarea_text(field("restriction").select_one("textarea") if field("restriction") else None),
         "test_data": _textarea_text(field("test_data").select_one("textarea") if field("test_data") else None),
         "project": _select_selected(field("project").select_one("select") if field("project") else None),
+        "project_id": _select_selected_value(field("project").select_one("select") if field("project") else None),
         "engineer": "; ".join(engineers),
         "curator": _select_selected(field("curator").select_one("select") if field("curator") else None),
         "updated_at": _readonly_text(soup, "updated_at"),
@@ -390,3 +391,80 @@ def parse_task(html: str, url: str) -> tuple[dict, list[dict]]:
                 "description": _input_value(tr.select_one(".field-description input")),
             })
     return task, links
+
+
+# ---------------------------------------------------------------------------
+# Проект: все поля формы .form-row.field-* автоматически
+# ---------------------------------------------------------------------------
+
+def parse_project(html: str, url: str) -> dict:
+    """Парсит страницу проекта. Возвращает все поля формы.
+
+    Поля извлекаются автоматически из каждого .form-row.field-<name> по типу
+    элемента: checkbox → флаг, select → текст выбранной option, textarea → текст,
+    .readonly → текст, иначе input → value.
+    """
+    soup = BeautifulSoup(html, "lxml")
+
+    project = {
+        "project_id": "",
+        "name": _text(soup.select_one("h2")),
+        "url": url,
+    }
+
+    m = re.search(r"/project/(\d+)/change/", url)
+    if m:
+        project["project_id"] = m.group(1)
+
+    for row in soup.select(".form-row"):
+        # имя поля из класса field-<name>
+        cls = [c for c in row.get("class", []) if c.startswith("field-")]
+        if not cls:
+            continue
+        field_name = cls[0][len("field-"):]
+        if not field_name:
+            continue
+
+        # datetime: два input name="<field>_0" и name="<field>_1" (дата + время)
+        dt_date = row.select_one('input[name$="_0"]')
+        dt_time = row.select_one('input[name$="_1"]')
+        if dt_date is not None and dt_time is not None:
+            project[field_name] = (
+                f"{_input_value(dt_date)} {_input_value(dt_time)}".strip()
+            )
+            continue
+
+        # checkbox
+        checkbox = row.select_one('input[type="checkbox"]')
+        if checkbox is not None:
+            project[field_name] = _checkbox_checked(checkbox)
+            continue
+
+        # select
+        select = row.select_one("select")
+        if select is not None:
+            project[field_name] = _select_selected(select)
+            continue
+
+        # textarea
+        textarea = row.select_one("textarea")
+        if textarea is not None:
+            project[field_name] = _textarea_text(textarea)
+            continue
+
+        # readonly
+        readonly = row.select_one(".readonly")
+        if readonly is not None:
+            project[field_name] = _text(readonly)
+            continue
+
+        # input
+        inp = row.select_one("input")
+        if inp is not None:
+            project[field_name] = _input_value(inp)
+            continue
+
+        # иначе — текст строки
+        project[field_name] = _text(row)
+
+    return project

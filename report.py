@@ -76,7 +76,7 @@ FIELD_LABELS = {
     "title": "Имя задачи",
     "jira_id": "JIRA_ID",
     "page_id": "ID родительской страницы",
-    "wiki_url": "Wiki",
+    "wiki_url": "Ссылка на wiki",
     "grafana_url_task": "Grafana url",
     "station_metrics": "Station metrics",
     "server_metrics": "Server metrics",
@@ -85,6 +85,16 @@ FIELD_LABELS = {
     "restriction": "Ограничения",
     "test_data": "Тестовые данные",
     "project": "Проект",
+    "project_id": "ID проекта",
+    "project_name_shrt": "Наименование проекта",
+    "project_name_full": "Полное наименование системы",
+    "project_description": "Описание",
+    "project_url": "Точки доступа",
+    "gitlab_url": "Скрипты gitlab",
+    "sub_systems": "Подсистемы",
+    "product": "Продукт",
+    "default_sla_time": "SLA",
+    "influxdb": "Конфигурация influxdb",
     "updated_at": "Дата обновления",
     # Ссылки задач
     "link_id": "ID ссылки",
@@ -167,14 +177,14 @@ def _fmt(value: str) -> str:
     return _esc(value).replace("\n", "<br>")
 
 
-def _render_value(key: str, value: str) -> str:
+def _render_value(key: str, value: str, url_fields: set | None = None) -> str:
     """Рендер значения поля: ссылка, длинный текст или обычный текст."""
     value = str(value or "")
     if not value:
         return '<span class="empty">—</span>'
     if key == "url_preview":
         return f'<a href="{_esc(value)}" target="_blank" rel="noopener">Превью</a>'
-    if key in URL_FIELDS:
+    if key in URL_FIELDS or (url_fields and key in url_fields):
         return f'<a href="{_esc(value)}" target="_blank" rel="noopener">{_esc(value)}</a>'
     if key in TEXT_FIELDS:
         return f'<div class="multiline">{_fmt(value)}</div>'
@@ -194,7 +204,7 @@ def _field_table(data: dict, order: list[str]) -> str:
     return f'<table class="fields">{"" .join(rows)}</table>'
 
 
-def _horizontal_table(data: dict, order: list[str]) -> str:
+def _horizontal_table(data: dict, order: list[str], url_fields: set | None = None) -> str:
     """Горизонтальная таблица: одна строка заголовков + одна строка значений."""
     keys = [k for k in order if k in data]
     if not keys:
@@ -207,7 +217,9 @@ def _horizontal_table(data: dict, order: list[str]) -> str:
             headers.append(f'<th class="has-tip" data-tip="{_esc(tip)}">{_esc(label)}</th>')
         else:
             headers.append(f"<th>{_esc(label)}</th>")
-    values = "".join(f"<td>{_render_value(k, data.get(k, ""))}</td>" for k in keys)
+    values = "".join(
+        f"<td>{_render_value(k, data.get(k, ""), url_fields)}</td>" for k in keys
+    )
     return f'<table class="hfields"><tr>{"".join(headers)}</tr><tr>{values}</tr></table>'
 
 
@@ -308,6 +320,7 @@ ENTITY_LABELS = {
     "tests": "Тесты",
     "tasks": "Задачи",
     "task_links": "Ссылки задач",
+    "projects": "Проекты",
 }
 
 # URL-паттерны страниц портала по сущности
@@ -316,6 +329,7 @@ ENTITY_URL_PATTERNS = {
     "iterations": f"{config.BASE_URL}/admin/autoreport/iteration/{{id}}/change/",
     "tests": f"{config.BASE_URL}/admin/autoreport/test/{{id}}/change/",
     "tasks": f"{config.BASE_URL}/admin/autoreport/task/{{id}}/change/",
+    "projects": f"{config.BASE_URL}/admin/autoreport/project/{{id}}/change/",
 }
 
 
@@ -427,6 +441,7 @@ def build_report(run_dir: str) -> str:
     tests = _load_csv(os.path.join(run_dir, "tests.csv"))
     tasks = _load_csv(os.path.join(run_dir, "tasks.csv"))
     links = _load_csv(os.path.join(run_dir, "task_links.csv"))
+    projects = _load_csv(os.path.join(run_dir, "projects.csv"))
     checks = _load_csv(os.path.join(run_dir, "checks.csv"))
 
     # Индексы по id
@@ -439,6 +454,9 @@ def build_report(run_dir: str) -> str:
     links_by_task: dict[str, list[dict]] = {}
     for lk in links:
         links_by_task.setdefault(lk.get("task_id", ""), []).append(lk)
+    projects_by_id: dict[str, dict] = {}
+    for p in projects:
+        projects_by_id[p.get("project_id", "")] = p
 
     # Сводка
     stats = (
@@ -447,6 +465,7 @@ def build_report(run_dir: str) -> str:
         + _stat_card("Тестов", len(tests), "🧪")
         + _stat_card("Задач", len(tasks), "📌")
         + _stat_card("Ссылок задач", len(links), "🔗")
+        + _stat_card("Проектов", len(projects), "📁")
     )
 
     # Секция ГОСТов
@@ -513,12 +532,45 @@ def build_report(run_dir: str) -> str:
             f'<a href="{_esc(turl)}" target="_blank" rel="noopener">{_esc(tname)}</a>'
             if turl else _esc(tname)
         )
+        pid = t.get("project_id", "")
+        proj = projects_by_id.get(pid)
+        if proj and proj.get("url"):
+            project_link = (
+                f'<a class="preview-link" href="{_esc(proj["url"])}" target="_blank" rel="noopener">'
+                f'Проект {_esc(proj.get("name", pid))}</a>'
+            )
+        elif pid:
+            project_link = f'<span class="preview-link">Проект {_esc(pid)}</span>'
+        else:
+            project_link = ""
         task_sections.append(
-            f'<div class="card"><h3>Задача {title}</h3>'
+            f'<div class="card"><h3>Задача {title} {project_link}</h3>'
             f'{_horizontal_table(t, task_h_order)}'
             f'{_field_table(t, TASK_TEXT_FIELDS)}'
             f'<h4>Ссылки задач ({len(lks)})</h4>'
             f'{_data_table(lks, LINK_ORDER, "link_id")}'
+            f"</div>"
+        )
+
+    # Секция проектов
+    project_text_fields = ["project_name_shrt", "project_name_full", "project_description"]
+    project_sections = []
+    for p in projects:
+        pid = p.get("project_id", "")
+        pname = p.get("name", pid)
+        purl = p.get("url", "")
+        title = (
+            f'<a href="{_esc(purl)}" target="_blank" rel="noopener">{_esc(pname)}</a>'
+            if purl else _esc(pname)
+        )
+        p_order = [
+            k for k in p
+            if k not in ("project_id", "name", "url", "project_url", *project_text_fields)
+        ]
+        project_sections.append(
+            f'<div class="card" id="project-{_esc(pid)}"><h3>Проект {title}</h3>'
+            f'{_horizontal_table(p, p_order, url_fields={"gitlab_url", "wiki_url"})}'
+            f'{_field_table(p, project_text_fields)}'
             f"</div>"
         )
 
@@ -537,6 +589,7 @@ def build_report(run_dir: str) -> str:
             iid = it.get("iteration_id", "")
             sidebar_items.append(f'<a class="sub-link2" href="#iter-{_esc(iid)}">Итерация {_esc(iid)}</a>')
     sidebar_items.append('<a href="#tasks">Задачи</a>')
+    sidebar_items.append('<a href="#projects">Проекты</a>')
     sidebar_html = "".join(sidebar_items)
 
     now = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
@@ -698,6 +751,9 @@ a:hover {{ text-decoration: underline; }}
 
       <h2 id="tasks">Задачи</h2>
       {''.join(task_sections) if task_sections else '<p class="empty">Нет данных</p>'}
+
+      <h2 id="projects">Проекты</h2>
+      {''.join(project_sections) if project_sections else '<p class="empty">Нет данных</p>'}
 
       <div class="footer">Сформировано автоматически скриптом GOST Checker</div>
     </div>

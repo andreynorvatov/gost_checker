@@ -64,7 +64,7 @@ TASK_FIELDS = [
     "wiki_url", "status", "testing_result", "grafana_url",
     "station_metrics", "server_metrics", "bottlenecks", "recommendation",
     "purposes", "requirements", "restriction", "test_data",
-    "project", "engineer", "curator", "updated_at",
+    "project", "project_id", "engineer", "curator", "updated_at",
 ]
 
 TASK_LINK_FIELDS = [

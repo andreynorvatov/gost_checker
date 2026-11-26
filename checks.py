@@ -37,6 +37,7 @@ ENTITY_ID_FIELDS = {
     "tests": "test_id",
     "tasks": "task_id",
     "task_links": "link_id",
+    "projects": "project_id",
 }
 
 # Колонки checks.csv
