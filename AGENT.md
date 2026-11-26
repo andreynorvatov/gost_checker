@@ -2,7 +2,7 @@
 
 Скрипт обходит данные ГОСТ отчетов на `https://autoreportkns.mos.ru` (Django admin) и
 сохраняет их в CSV. Каждый запуск создаёт новую папку `{alias}_{quarter}_{timestamp}`
-в `output/` с 6 CSV-файлами и HTML-отчётом `report.html`.
+в `output/` с 7 CSV-файлами и HTML-отчётом `report.html`.
 
 ## Запуск
 
@@ -19,7 +19,7 @@ python3 -m venv .venv
 | [`.env`](.env) | Секреты: `COOKIE_STRING` (куки для авторизации). Не коммитится (в `.gitignore`) |
 | [`config.py`](config.py) | Константы: `BASE_URL`, параметры запроса, таймауты, ретраи; `COOKIE_STRING` читается из `.env` |
 | [`http_client.py`](http_client.py) | Сессия `requests` с куками, ретраи с backoff, `get_html(url)` |
-| [`parsers.py`](parsers.py) | Парсеры HTML: `parse_summary`, `parse_gost`, `parse_iteration`, `parse_test`, `parse_task`, `parse_project` |
+| [`parsers.py`](parsers.py) | Парсеры HTML: `parse_summary`, `parse_gost`, `parse_iteration`, `parse_test`, `parse_test_list`, `parse_task`, `parse_project` |
 | [`storage.py`](storage.py) | Папка запуска, запись CSV (utf-8-sig), поля CSV-файлов |
 | [`checks.py`](checks.py) | Проверка собранных CSV по правилам из `checks_config.json`, запись `checks.csv` (можно запускать отдельно: `python checks.py <папка>`) |
 | [`checks_config.json`](checks_config.json) | Правила проверок (JSON): сущность → список правил (поле + тип + параметры) |
@@ -28,27 +28,35 @@ python3 -m venv .venv
 | [`main.py`](main.py) | Оркестрация обхода, логирование в консоль, сводка ошибок, проверки, генерация отчёта |
 | [`requirements.txt`](requirements.txt) | Зависимости: requests, beautifulsoup4, lxml, python-dotenv |
 
-## Логика обхода (6 уровней)
+## Логика обхода (7 уровней)
 
 ```
 summary (/gost/summary/) → ГОСТ (/admin/autoreport/gostreport/<id>/change/)
   → итерация (/admin/autoreport/iteration/<id>/change/)
-    → тест (/admin/autoreport/test/<id>/change/) — добираем url_preview, from_vp, to_vp
+    → тест (/admin/autoreport/test/<id>/change/) — добираем url_preview, from_vp, to_vp, engineer_id
   → задача (/admin/autoreport/task/<id>/change/) — дедупликация по task_id
     → проект (/admin/autoreport/project/<id>/change/) — дедупликация по project_id
+→ список тестов (/admin/autoreport/test/?all=&engineer__id__exact=<id>&period_from=...&period_to=...&q=)
 ```
 
 1. **Summary** — таблица `#gost-summary-table`: список ГОСТов со статистикой и ссылками.
 2. **ГОСТ** — форма `#gostreport_form` + inline-итерации `#iterations-group`.
 3. **Итерация** — форма `#iteration_form` + inline-тесты `#tests-group`.
-4. **Тест** — форма `#test_form`: добираем `url_preview`, `from_vp`, `to_vp`
-   (остальные поля теста берутся из inline-таблицы итерации).
+4. **Тест** — форма `#test_form`: добираем `url_preview`, `from_vp`, `to_vp`, `engineer_id`
+   (value выбранной option в select `.field-engineer`; остальные поля теста берутся
+   из inline-таблицы итерации).
 5. **Задача** — форма `#task_form` + inline-ссылки `#links-group`.
    Уникальные `task_id` собираются из итераций, каждая задача обходится один раз.
    Из поля «Проект» извлекается `project_id` (value выбранной option).
 6. **Проект** — форма проекта: все поля `.form-row.field-*` парсятся автоматически
    (checkbox/select/textarea/readonly/input). Уникальные `project_id` собираются из задач,
    каждый проект обходится один раз.
+7. **Список тестов** — changelist `/admin/autoreport/test/` (таблица `#result_list`).
+   По одному запросу на каждого инженера (`engineer__id__exact=<id>`), период
+   `period_from`/`period_to` = дата первого/последнего теста из tests.csv (только `YYYY-MM-DD`).
+   Результаты объединяются и дедуплицируются по `test_id`; `?all=` отключает пагинацию.
+   Строки связываются с tests.csv по `test_id` (добавляются `iteration_id`, `gost_id`, `engineer_id`).
+   Если инженеров или дат нет — создаётся пустой `test_list.csv` с заголовками.
 
 ## Выходные CSV
 

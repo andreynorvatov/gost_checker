@@ -56,8 +56,12 @@ TEST_FIELDS = [
     "test_id", "iteration_id", "url", "number", "detailing",
     "name_of_test", "from_ts", "to_ts", "test_description", "test_results",
     "grafana_url", "start_date", "end_date", "duration", "engineer",
-    "url_preview", "from_vp", "to_vp",
+    "engineer_id", "url_preview", "from_vp", "to_vp",
 ]
+
+# Поля test_list.csv (changelist тестов). Динамические колонки добавляются
+# в main.py по фактическим колонкам таблицы #result_list.
+TEST_LIST_FIELDS = ["test_id", "url"]
 
 TASK_FIELDS = [
     "task_id", "name", "url", "created_at", "title", "jira_id", "page_id",

@@ -309,6 +309,7 @@ def parse_test(html: str, url: str) -> dict:
         "url_preview": "",
         "from_vp": _readonly_text(soup, "from_vp"),
         "to_vp": _readonly_text(soup, "to_vp"),
+        "engineer_id": "",
     }
 
     m = re.search(r"/test/(\d+)/change/", url)
@@ -320,7 +321,69 @@ def parse_test(html: str, url: str) -> dict:
         a = preview.find("a", href=True)
         if a:
             result["url_preview"] = _full_url(a["href"])
+
+    # id инженера (value выбранной option в select .field-engineer)
+    engineer_sel = field("engineer").select_one("select") if field("engineer") else None
+    result["engineer_id"] = _select_selected_value(engineer_sel)
     return result
+
+
+# ---------------------------------------------------------------------------
+# Changelist тестов: список из /admin/autoreport/test/
+# ---------------------------------------------------------------------------
+
+def parse_test_list(html: str) -> list[dict]:
+    """Парсит таблицу #result_list changelist тестов.
+
+    Колонки берутся из thead (класс column-<name>), значения — из tbody
+    (класс field-<name>). test_id и url — из ссылки /test/<id>/change/.
+    Возвращает список строк с ключами = имена колонок + test_id + url.
+    """
+    soup = BeautifulSoup(html, "lxml")
+    table = soup.select_one("#result_list")
+    if table is None:
+        return []
+
+    # Имена колонок из thead (пропускаем чекбокс-колонку)
+    columns = []
+    for th in table.select("thead th"):
+        cls = [c for c in th.get("class", []) if c.startswith("column-")]
+        if not cls:
+            continue
+        name = cls[0][len("column-"):]
+        if name and name != "action-checkbox":
+            columns.append(name)
+
+    rows = []
+    for tr in table.select("tbody tr"):
+        # test_id и url из ссылки /test/<id>/change/
+        link = tr.select_one("a[href*='/admin/autoreport/test/']")
+        if link is None:
+            continue
+        href = link["href"]
+        m = re.search(r"/test/(\d+)/change/", href)
+        if not m:
+            continue
+        test_id = m.group(1)
+
+        row = {"test_id": test_id, "url": _full_url(href)}
+        for name in columns:
+            cell = tr.select_one(f".field-{name}")
+            if cell is None:
+                row[name] = ""
+                continue
+            # grafana — ссылка
+            if name == "grafana":
+                a = cell.find("a", href=True)
+                row[name] = a["href"].strip() if a else _text(cell)
+            # test_name — текст ссылки (название теста)
+            elif name == "test_name":
+                a = cell.find("a", href=True)
+                row[name] = _text(a) if a else _text(cell)
+            else:
+                row[name] = _text(cell)
+        rows.append(row)
+    return rows
 
 
 # ---------------------------------------------------------------------------

@@ -15,6 +15,8 @@ checks.csv (utf-8-sig) с результатами каждой проверки
   name          — значение — фамилия и имя (2+ кириллических слова)
   link_type_count — агрегатная: у каждой задачи ровно count ссылок каждого
                     типа из types (например, methodology/report/artifacts по 2)
+  test_belongs   — тест из test_list относится к одному из ГОСТов и одной
+                    из итераций (iteration_id/gost_id существуют в данных)
 
 Пустое значение поля = нарушение (fail) для всех типов.
 """
@@ -37,6 +39,7 @@ ENTITY_ID_FIELDS = {
     "gosts": "gost_id",
     "iterations": "iteration_id",
     "tests": "test_id",
+    "test_list": "test_id",
     "tasks": "task_id",
     "task_links": "link_id",
     "projects": "project_id",

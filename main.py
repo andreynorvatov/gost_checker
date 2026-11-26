@@ -8,6 +8,7 @@ gosts.csv, iterations.csv, tests.csv, tasks.csv, task_links.csv,
 import logging
 import os
 import sys
+from datetime import datetime
 from urllib.parse import urlencode
 
 import checks
@@ -60,6 +61,10 @@ def main() -> int:
     task_ids: set[str] = set()
     project_ids: set[str] = set()
     project_writer = None
+
+    # Метаданные тестов для построения test_list.csv (changelist)
+    iter_gost: dict[str, str] = {}   # iteration_id -> gost_id
+    test_meta: dict[str, dict] = {}  # test_id -> {iteration_id, gost_id, engineer_id, start_date, end_date}
 
     try:
         # 1. Summary
@@ -114,6 +119,7 @@ def main() -> int:
                     if key not in ("iteration_id", "gost_id", "url"):
                         iteration[key] = value
                 iter_writer.write(iteration)
+                iter_gost[iteration["iteration_id"]] = gost["gost_id"]
 
                 if iteration.get("task_id"):
                     task_ids.add(iteration["task_id"])
@@ -132,6 +138,15 @@ def main() -> int:
                         if key not in ("test_id", "url"):
                             test[key] = value
                     test_writer.write(test)
+
+                    # Метаданные для test_list.csv
+                    test_meta[test["test_id"]] = {
+                        "iteration_id": test.get("iteration_id", ""),
+                        "gost_id": iter_gost.get(test.get("iteration_id", ""), ""),
+                        "engineer_id": test.get("engineer_id", ""),
+                        "start_date": test.get("start_date", ""),
+                        "end_date": test.get("end_date", ""),
+                    }
 
         # 5. Задачи (дедупликация по task_id)
         logger.info("Уникальных задач: %d", len(task_ids))
@@ -179,6 +194,81 @@ def main() -> int:
         for p in projects:
             project_writer.write(p)
 
+        # 7. Список тестов из changelist (test_list.csv)
+        test_list_writer = None
+        try:
+            def _date_only(value: str) -> str:
+                """Нормализует дату теста до YYYY-MM-DD."""
+                value = (value or "").strip()
+                if not value:
+                    return ""
+                for fmt in ("%d-%m-%Y", "%Y-%m-%d", "%d.%m.%Y"):
+                    try:
+                        return datetime.strptime(value[:10], fmt).strftime("%Y-%m-%d")
+                    except ValueError:
+                        continue
+                return value[:10]
+
+            start_dates = [_date_only(m["start_date"]) for m in test_meta.values()]
+            start_dates = [d for d in start_dates if d]
+            end_dates = [_date_only(m["end_date"]) for m in test_meta.values()]
+            end_dates = [d for d in end_dates if d]
+            engineer_ids = sorted({m["engineer_id"] for m in test_meta.values() if m["engineer_id"]})
+
+            if not engineer_ids or not start_dates:
+                logger.warning(
+                    "Нет инженеров или дат тестов — test_list.csv будет пустым"
+                )
+                test_list_writer = storage.CsvWriter(
+                    os.path.join(run_dir, "test_list.csv"), storage.TEST_LIST_FIELDS
+                )
+            else:
+                period_from = min(start_dates)
+                period_to = max(end_dates) if end_dates else max(start_dates)
+                logger.info(
+                    "Сбор test_list: инженеров=%d, период %s..%s",
+                    len(engineer_ids), period_from, period_to,
+                )
+                test_list_rows: dict[str, dict] = {}
+                for eid in engineer_ids:
+                    url = (
+                        f"{config.BASE_URL}/admin/autoreport/test/"
+                        f"?all=&engineer__id__exact={eid}"
+                        f"&period_from={period_from}&period_to={period_to}&q="
+                    )
+                    try:
+                        changelist_html = client.get_html(url)
+                        for row in parsers.parse_test_list(changelist_html):
+                            test_list_rows[row["test_id"]] = row
+                    except Exception as exc:
+                        logger.error(
+                            "Ошибка changelist тестов (инженер %s): %s", eid, exc
+                        )
+                        errors.append(f"test_list engineer {eid}: {exc}")
+
+                # Связываем с tests.csv по test_id
+                for tid, row in test_list_rows.items():
+                    meta = test_meta.get(tid, {})
+                    row["iteration_id"] = meta.get("iteration_id", "")
+                    row["gost_id"] = meta.get("gost_id", "")
+                    row["engineer_id"] = meta.get("engineer_id", "")
+
+                # Поля: test_id, url + все колонки changelist
+                test_list_fields = list(storage.TEST_LIST_FIELDS)
+                for row in test_list_rows.values():
+                    for key in row:
+                        if key not in test_list_fields:
+                            test_list_fields.append(key)
+                test_list_writer = storage.CsvWriter(
+                    os.path.join(run_dir, "test_list.csv"), test_list_fields
+                )
+                for row in test_list_rows.values():
+                    test_list_writer.write(row)
+                logger.info("Собрано тестов в test_list.csv: %d", len(test_list_rows))
+        except Exception as exc:
+            logger.error("Ошибка сбора test_list: %s", exc)
+            errors.append(f"test_list: {exc}")
+
     finally:
         gost_writer.close()
         iter_writer.close()
@@ -187,6 +277,8 @@ def main() -> int:
         task_link_writer.close()
         if project_writer:
             project_writer.close()
+        if test_list_writer:
+            test_list_writer.close()
 
     # Проверки собранных данных по правилам из checks_config.json
     try:

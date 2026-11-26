@@ -70,8 +70,12 @@ FIELD_LABELS = {
     "end_date": "Конец теста",
     "duration": "Длительность (сек)",
     "engineer": "Инженер",
+    "engineer_id": "ID инженера",
     "from_vp": "From vp",
     "to_vp": "To vp",
+    # Список тестов (changelist)
+    "test_name": "Название теста",
+    "grafana": "Grafana",
     # Задача
     "title": "Имя задачи",
     "jira_id": "JIRA_ID",
@@ -119,7 +123,7 @@ FIELD_TOOLTIPS = {
 }
 
 # Поля-ссылки (рендерятся как <a>)
-URL_FIELDS = {"url", "url_preview", "share_url", "grafana_url", "grafana_url_task", "link_url"}
+URL_FIELDS = {"url", "url_preview", "share_url", "grafana_url", "grafana_url_task", "link_url", "grafana"}
 
 # Поля с длинным текстом (рендерятся с переносами)
 TEXT_FIELDS = {
@@ -184,6 +188,8 @@ def _render_value(key: str, value: str, url_fields: set | None = None) -> str:
         return '<span class="empty">—</span>'
     if key == "url_preview":
         return f'<a href="{_esc(value)}" target="_blank" rel="noopener">Превью</a>'
+    if key in ("grafana", "grafana_url"):
+        return f'<a href="{_esc(value)}" target="_blank" rel="noopener">Grafana</a>'
     if key in URL_FIELDS or (url_fields and key in url_fields):
         return f'<a href="{_esc(value)}" target="_blank" rel="noopener">{_esc(value)}</a>'
     if key in TEXT_FIELDS:
@@ -304,6 +310,19 @@ def _load_csv(path: str) -> list[dict]:
         return []
     with open(path, encoding="utf-8-sig", newline="") as fh:
         return list(csv.DictReader(fh))
+
+
+def _date_only(value: str) -> str:
+    """Нормализует дату теста до YYYY-MM-DD."""
+    value = (value or "").strip()
+    if not value:
+        return ""
+    for fmt in ("%d-%m-%Y", "%Y-%m-%d", "%d.%m.%Y"):
+        try:
+            return datetime.strptime(value[:10], fmt).strftime("%Y-%m-%d")
+        except ValueError:
+            continue
+    return value[:10]
 
 
 def _stat_card(label: str, value: int, icon: str) -> str:
@@ -448,6 +467,7 @@ def build_report(run_dir: str) -> str:
     tasks = _load_csv(os.path.join(run_dir, "tasks.csv"))
     links = _load_csv(os.path.join(run_dir, "task_links.csv"))
     projects = _load_csv(os.path.join(run_dir, "projects.csv"))
+    test_list = _load_csv(os.path.join(run_dir, "test_list.csv"))
     checks = _load_csv(os.path.join(run_dir, "checks.csv"))
 
     # Индексы по id
@@ -472,6 +492,7 @@ def build_report(run_dir: str) -> str:
         + _stat_card("Задач", len(tasks), "📌")
         + _stat_card("Ссылок задач", len(links), "🔗")
         + _stat_card("Проектов", len(projects), "📁")
+        + _stat_card("Тестов (список)", len(test_list), "📋")
     )
 
     # Секция ГОСТов
@@ -580,6 +601,41 @@ def build_report(run_dir: str) -> str:
             f"</div>"
         )
 
+    # Секция списка тестов (changelist)
+    test_list_section = ""
+    test_list_title = ""
+    if test_list:
+        test_list_order = ["test_id", "iteration_id", "gost_id"]
+        for k in test_list[0]:
+            if k not in test_list_order and k not in ("url", "engineer_id"):
+                test_list_order.append(k)
+        test_list_section = _data_table(
+            test_list, test_list_order, "test_id", link_col="test_id"
+        )
+
+        # Период из дат тестов (для заголовка и ссылки на changelist)
+        start_dates = [_date_only(r.get("start_date", "")) for r in test_list]
+        start_dates = [d for d in start_dates if d]
+        end_dates = [_date_only(r.get("end_date", "")) for r in test_list]
+        end_dates = [d for d in end_dates if d]
+        period_from = min(start_dates) if start_dates else ""
+        period_to = max(end_dates) if end_dates else (max(start_dates) if start_dates else "")
+        period_label = f"с {period_from} по {period_to}" if period_from and period_to else ""
+        engineer_id = test_list[0].get("engineer_id", "") if test_list else ""
+        changelist_url = (
+            f"{config.BASE_URL}/admin/autoreport/test/"
+            f"?all=&engineer__id__exact={engineer_id}"
+            f"&period_from={period_from}&period_to={period_to}&q="
+        )
+        test_list_title = (
+            f'Список тестов {_esc(period_label)} '
+            f'<span class="count">({len(test_list)})</span>'
+            f'<a class="preview-link" href="{_esc(changelist_url)}" '
+            f'target="_blank" rel="noopener">Список на портале</a>'
+        )
+    else:
+        test_list_title = "Список тестов"
+
     checks_html = _checks_section(checks)
 
     # Панель навигации: разделы + подразделы ГОСТов по итерациям
@@ -596,6 +652,8 @@ def build_report(run_dir: str) -> str:
             sidebar_items.append(f'<a class="sub-link2" href="#iter-{_esc(iid)}">Итерация {_esc(iid)}</a>')
     sidebar_items.append('<a href="#tasks">Задачи</a>')
     sidebar_items.append('<a href="#projects">Проекты</a>')
+    if test_list:
+        sidebar_items.append('<a href="#test_list">Список тестов</a>')
     sidebar_html = "".join(sidebar_items)
 
     now = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
@@ -657,6 +715,7 @@ h4 {{ font-size: 15px; margin: 14px 0 8px; color: var(--muted); }}
 h5 {{ font-size: 14px; margin: 12px 0 6px; color: var(--muted); }}
 .preview-link {{ display: inline-block; margin-left: 10px; padding: 2px 10px; font-size: 12px; font-weight: 600; background: var(--accent-soft); border: 1px solid #dbeafe; border-radius: 20px; color: var(--accent); vertical-align: middle; }}
 .preview-link:hover {{ background: #dbeafe; text-decoration: none; }}
+.count {{ color: var(--muted); font-weight: 600; }}
 .above-fields {{ display: flex; flex-wrap: wrap; gap: 6px 20px; margin-bottom: 10px; padding: 8px 10px; background: #f8fafc; border: 1px solid var(--border); border-radius: 8px; font-size: 12.5px; }}
 .af-item {{ white-space: nowrap; }}
 .af-label {{ color: var(--muted); font-weight: 600; }}
@@ -762,6 +821,9 @@ a:hover {{ text-decoration: underline; }}
 
       <h2 id="projects">Проекты</h2>
       {''.join(project_sections) if project_sections else '<p class="empty">Нет данных</p>'}
+
+      <h2 id="test_list">{test_list_title}</h2>
+      {test_list_section if test_list_section else '<p class="empty">Нет данных</p>'}
 
       <div class="footer">Сформировано автоматически скриптом GOST Checker</div>
     </div>
