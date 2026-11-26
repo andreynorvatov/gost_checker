@@ -16,7 +16,7 @@ COOKIE_STRING = os.getenv("COOKIE_STRING", "")
 # Параметры запроса summary (одна комбинация за запуск)
 QUERY_PARAMS = {
     "quarter": "2026_3",
-    "alias": "RNIP_EPSH",
+    "alias": "DEG",
     "type_of_test": "",
     "gost_sys": "",
     "editor": "",

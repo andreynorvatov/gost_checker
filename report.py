@@ -73,7 +73,7 @@ FIELD_LABELS = {
     "engineer_id": "ID инженера",
     "from_vp": "From vp",
     "to_vp": "To vp",
-    # Список тестов (changelist)
+    # Список проведенных тестов (changelist)
     "test_name": "Название теста",
     "grafana": "Grafana",
     # Задача
@@ -337,6 +337,7 @@ ENTITY_LABELS = {
     "gosts": "ГОСТы",
     "iterations": "Итерации",
     "tests": "Тесты",
+    "test_list": "Список проведенных тестов",
     "tasks": "Задачи",
     "task_links": "Ссылки задач",
     "projects": "Проекты",
@@ -347,6 +348,7 @@ ENTITY_URL_PATTERNS = {
     "gosts": f"{config.BASE_URL}/admin/autoreport/gostreport/{{id}}/change/",
     "iterations": f"{config.BASE_URL}/admin/autoreport/iteration/{{id}}/change/",
     "tests": f"{config.BASE_URL}/admin/autoreport/test/{{id}}/change/",
+    "test_list": f"{config.BASE_URL}/admin/autoreport/test/{{id}}/change/",
     "tasks": f"{config.BASE_URL}/admin/autoreport/task/{{id}}/change/",
     "projects": f"{config.BASE_URL}/admin/autoreport/project/{{id}}/change/",
 }
@@ -492,7 +494,7 @@ def build_report(run_dir: str) -> str:
         + _stat_card("Задач", len(tasks), "📌")
         + _stat_card("Ссылок задач", len(links), "🔗")
         + _stat_card("Проектов", len(projects), "📁")
-        + _stat_card("Тестов (список)", len(test_list), "📋")
+        + _stat_card("Список проведенных тестов", len(test_list), "📋")
     )
 
     # Секция ГОСТов
@@ -613,7 +615,7 @@ def build_report(run_dir: str) -> str:
             test_list, test_list_order, "test_id", link_col="test_id"
         )
 
-        # Период из дат тестов (для заголовка и ссылки на changelist)
+        # Период из дат тестов (для заголовка и ссылок на changelist)
         start_dates = [_date_only(r.get("start_date", "")) for r in test_list]
         start_dates = [d for d in start_dates if d]
         end_dates = [_date_only(r.get("end_date", "")) for r in test_list]
@@ -621,20 +623,52 @@ def build_report(run_dir: str) -> str:
         period_from = min(start_dates) if start_dates else ""
         period_to = max(end_dates) if end_dates else (max(start_dates) if start_dates else "")
         period_label = f"с {period_from} по {period_to}" if period_from and period_to else ""
-        engineer_id = test_list[0].get("engineer_id", "") if test_list else ""
-        changelist_url = (
-            f"{config.BASE_URL}/admin/autoreport/test/"
-            f"?all=&engineer__id__exact={engineer_id}"
-            f"&period_from={period_from}&period_to={period_to}&q="
+
+        # Имя инженера по engineer_id (из tests.csv)
+        engineer_names: dict[str, str] = {}
+        for t in tests:
+            eid = t.get("engineer_id", "")
+            if eid and eid not in engineer_names:
+                engineer_names[eid] = t.get("engineer", "") or ""
+
+        # Ссылка на changelist для каждого инженера (с именем в подписи)
+        engineer_ids = sorted(
+            {r.get("engineer_id", "") for r in test_list if r.get("engineer_id")}
         )
+        links_html = []
+        for eid in engineer_ids:
+            e_start = [
+                _date_only(r.get("start_date", ""))
+                for r in test_list if r.get("engineer_id") == eid
+            ]
+            e_start = [d for d in e_start if d]
+            e_end = [
+                _date_only(r.get("end_date", ""))
+                for r in test_list if r.get("engineer_id") == eid
+            ]
+            e_end = [d for d in e_end if d]
+            e_from = min(e_start) if e_start else period_from
+            e_to = max(e_end) if e_end else (max(e_start) if e_start else period_to)
+            url = (
+                f"{config.BASE_URL}/admin/autoreport/test/"
+                f"?all=&engineer__id__exact={eid}"
+                f"&period_from={e_from}&period_to={e_to}&q="
+            )
+            name = engineer_names.get(eid, "")
+            label = f"Список на портале {name}".strip() if name else "Список на портале"
+            links_html.append(
+                f'<a class="preview-link" href="{_esc(url)}" '
+                f'target="_blank" rel="noopener">{_esc(label)}</a>'
+            )
+        links_str = " ".join(links_html)
+
         test_list_title = (
-            f'Список тестов {_esc(period_label)} '
+            f'Список проведенных тестов {_esc(period_label)} '
             f'<span class="count">({len(test_list)})</span>'
-            f'<a class="preview-link" href="{_esc(changelist_url)}" '
-            f'target="_blank" rel="noopener">Список на портале</a>'
+            f'{links_str}'
         )
     else:
-        test_list_title = "Список тестов"
+        test_list_title = "Список проведенных тестов"
 
     checks_html = _checks_section(checks)
 
@@ -653,7 +687,7 @@ def build_report(run_dir: str) -> str:
     sidebar_items.append('<a href="#tasks">Задачи</a>')
     sidebar_items.append('<a href="#projects">Проекты</a>')
     if test_list:
-        sidebar_items.append('<a href="#test_list">Список тестов</a>')
+        sidebar_items.append('<a href="#test_list">Список проведенных тестов</a>')
     sidebar_html = "".join(sidebar_items)
 
     now = datetime.now().strftime("%d.%m.%Y %H:%M:%S")

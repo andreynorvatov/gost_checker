@@ -194,7 +194,7 @@ def main() -> int:
         for p in projects:
             project_writer.write(p)
 
-        # 7. Список тестов из changelist (test_list.csv)
+        # 7. Список проведенных тестов из changelist (test_list.csv)
         test_list_writer = None
         try:
             def _date_only(value: str) -> str:
