@@ -1,0 +1,15 @@
+# Секреты
+.env
+
+# Виртуальное окружение
+.venv/
+
+# Результаты запусков
+output/
+
+# Кэш Python
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store
