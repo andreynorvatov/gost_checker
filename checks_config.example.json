@@ -1,0 +1,28 @@
+{
+  "gosts": [
+    {"field": "iteration_count", "type": "has_iterations", "description": "У ГОСТа есть 1 и более итераций"},
+    {"field": "editor", "type": "not_empty", "description": "Поле «Инженер» не пустое"},
+    {"field": "curator", "type": "not_empty", "description": "Поле «Лид» не пустое"},
+    {"field": "review", "type": "name", "description": "Поле «Ревьювер» — фамилия и имя"},
+    {"field": "start_actual_date", "type": "gost_dates_match", "description": "Начало/конец тестирования ГОСТа совпадают с датами итераций"},
+    {"field": "type_of_test", "type": "count_max", "max": 6, "description": "ГОСТ отчетов по каждому типу НиО/НТ не более 6"}
+  ],
+  "iterations": [
+    {"field": "test_count", "type": "has_tests", "description": "У итерации есть 1 и более тестов"},
+    {"field": "first_test_date", "type": "test_dates_match", "description": "Даты первого/последнего теста совпадают с фактическими датами тестов"},
+    {"field": "developed_script_count", "type": "or_min", "fields": ["developed_script_count", "updated_script_count"], "min": 0, "description": "Разработанных или актуализированных скриптов больше 0"},
+    {"field": "test_count", "type": "test_count_max", "max": 6, "description": "В итерации не более 6 тестов"},
+    {"field": "generator_count", "type": "range", "min": 1, "description": "Количество генераторов больше 0"}
+  ],
+  "tests": [
+    {"field": "test_description", "type": "not_empty", "description": "Описание теста не пустое"},
+    {"field": "test_results", "type": "not_empty", "description": "Результаты теста не пустые"}
+  ],
+  "tasks": [
+    {"field": "all", "type": "all_not_empty", "description": "Все поля задачи заполнены"}
+  ],
+  "task_links": [
+    {"field": "link_type", "type": "not_empty", "description": "Тип ссылки не пустой"},
+    {"field": "link_url", "type": "regex", "pattern": "^https?://", "description": "URL ссылки начинается с http(s)://"}
+  ]
+}

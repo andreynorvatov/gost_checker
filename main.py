@@ -10,6 +10,7 @@ import os
 import sys
 from urllib.parse import urlencode
 
+import checks
 import config
 import parsers
 import report
@@ -153,6 +154,13 @@ def main() -> int:
         test_writer.close()
         task_writer.close()
         task_link_writer.close()
+
+    # Проверки собранных данных по правилам из checks_config.json
+    try:
+        checks.run(run_dir)
+    except Exception as exc:
+        logger.error("Ошибка проверок: %s", exc)
+        errors.append(f"checks: {exc}")
 
     # HTML-отчёт
     try:

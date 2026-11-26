@@ -9,6 +9,8 @@ import html
 import os
 from datetime import datetime
 
+import config
+
 # Человекочитаемые названия полей
 FIELD_LABELS = {
     # ГОСТ
@@ -300,6 +302,124 @@ def _stat_card(label: str, value: int, icon: str) -> str:
     )
 
 
+ENTITY_LABELS = {
+    "gosts": "ГОСТы",
+    "iterations": "Итерации",
+    "tests": "Тесты",
+    "tasks": "Задачи",
+    "task_links": "Ссылки задач",
+}
+
+# URL-паттерны страниц портала по сущности
+ENTITY_URL_PATTERNS = {
+    "gosts": f"{config.BASE_URL}/admin/autoreport/gostreport/{{id}}/change/",
+    "iterations": f"{config.BASE_URL}/admin/autoreport/iteration/{{id}}/change/",
+    "tests": f"{config.BASE_URL}/admin/autoreport/test/{{id}}/change/",
+    "tasks": f"{config.BASE_URL}/admin/autoreport/task/{{id}}/change/",
+}
+
+
+def _entity_url(entity: str, entity_id: str) -> str | None:
+    """URL страницы элемента на портале. None, если ссылки нет
+    (например, entity_id — значение группы, а не id)."""
+    pattern = ENTITY_URL_PATTERNS.get(entity)
+    if not pattern or not entity_id:
+        return None
+    if not str(entity_id).strip().isdigit():
+        return None
+    return pattern.format(id=entity_id)
+
+
+def _checks_section(checks: list[dict]) -> str:
+    """Секция «Проверки»: сводка по сущностям + таблица нарушений (fail)."""
+    if not checks:
+        return ""
+
+    total = len(checks)
+    fails = [c for c in checks if c.get("status") == "fail"]
+
+    # Сводка по сущностям
+    by_entity: dict[str, dict[str, int]] = {}
+    for c in checks:
+        ent = c.get("entity", "")
+        agg = by_entity.setdefault(ent, {"total": 0, "ok": 0, "fail": 0})
+        agg["total"] += 1
+        if c.get("status") == "fail":
+            agg["fail"] += 1
+        else:
+            agg["ok"] += 1
+
+    summary_rows = []
+    for ent, agg in by_entity.items():
+        label = ENTITY_LABELS.get(ent, ent)
+        cls = "bad" if agg["fail"] else "good"
+        summary_rows.append(
+            f'<tr><td>{_esc(label)}</td><td>{agg["total"]}</td>'
+            f'<td>{agg["ok"]}</td><td class="{cls}">{agg["fail"]}</td></tr>'
+        )
+    summary_html = (
+        f'<table class="data checks-summary"><thead><tr>'
+        f"<th>Сущность</th><th>Всего</th><th>OK</th><th>Нарушений</th>"
+        f"</tr></thead><tbody>{''.join(summary_rows)}</tbody></table>"
+    )
+
+    # Полная таблица всех проверок (ok + fail) с фильтром по кнопке
+    all_rows = []
+    for c in checks:
+        status = c.get("status", "")
+        cls = "row-fail" if status == "fail" else "row-ok"
+        entity_id = c.get("entity_id", "")
+        url = _entity_url(c.get("entity", ""), entity_id)
+        id_html = (
+            f'<a href="{_esc(url)}" target="_blank" rel="noopener">{_esc(entity_id)}</a>'
+            if url else _esc(entity_id)
+        )
+        all_rows.append(
+            f'<tr class="{cls}" data-status="{_esc(status)}">'
+            f'<td>{_esc(ENTITY_LABELS.get(c.get("entity", ""), c.get("entity", "")))}</td>'
+            f'<td>{id_html}</td>'
+            f'<td>{_esc(FIELD_LABELS.get(c.get("field", ""), c.get("field", "")))}</td>'
+            f'<td>{_esc(c.get("check_type", ""))}</td>'
+            f'<td>{_esc(c.get("expected", ""))}</td>'
+            f'<td>{_esc(c.get("actual", ""))}</td>'
+            f'<td>{_esc(c.get("message", ""))}</td>'
+            f'<td>{_esc(c.get("description", ""))}</td>'
+            f'<td class="status-cell">{_esc(status)}</td></tr>'
+        )
+    table_html = (
+        f'<div class="checks-toolbar">'
+        f'<button class="btn-check" id="btn-all" onclick="filterChecks(\'all\')">Все ({total})</button>'
+        f'<button class="btn-check active" id="btn-fails" onclick="filterChecks(\'fails\')">Только нарушения ({len(fails)})</button>'
+        f'</div>'
+        f'<table class="data checks-table" id="checks-table"><thead><tr>'
+        f"<th>Сущность</th><th>ID</th><th>Поле</th><th>Тип</th>"
+        f"<th>Ожидалось</th><th>Фактически</th><th>Сообщение</th><th>Описание</th><th>Статус</th>"
+        f"</tr></thead><tbody>{''.join(all_rows)}</tbody></table>"
+    )
+
+    return (
+        f'<h2 id="checks">Проверки</h2>'
+        f'<div class="card">'
+        f'<div class="checks-total">Всего проверок: {total} · Нарушений: '
+        f'<span class="{"bad" if fails else "good"}">{len(fails)}</span></div>'
+        f"{summary_html}{table_html}"
+        f'<script>'
+        f"function filterChecks(mode) {{"
+        f"  var rows = document.querySelectorAll('#checks-table tbody tr');"
+        f"  var btnAll = document.getElementById('btn-all');"
+        f"  var btnFails = document.getElementById('btn-fails');"
+        f"  rows.forEach(function(r) {{"
+        f"    r.style.display = (mode === 'fails' && r.getAttribute('data-status') !== 'fail') ? 'none' : '';"
+        f"  }});"
+        f"  btnAll.classList.toggle('active', mode === 'all');"
+        f"  btnFails.classList.toggle('active', mode === 'fails');"
+        f"}}"
+        f"filterChecks('fails');"
+        f"</script>"
+        f"</div>"
+    )
+
+
 def build_report(run_dir: str) -> str:
     """Формирует report.html в папке запуска. Возвращает путь к файлу."""
     gosts = _load_csv(os.path.join(run_dir, "gosts.csv"))
@@ -307,6 +427,7 @@ def build_report(run_dir: str) -> str:
     tests = _load_csv(os.path.join(run_dir, "tests.csv"))
     tasks = _load_csv(os.path.join(run_dir, "tasks.csv"))
     links = _load_csv(os.path.join(run_dir, "task_links.csv"))
+    checks = _load_csv(os.path.join(run_dir, "checks.csv"))
 
     # Индексы по id
     iters_by_gost: dict[str, list[dict]] = {}
@@ -357,7 +478,7 @@ def build_report(run_dir: str) -> str:
                 if iurl else f'Итерация {_esc(iid)}'
             )
             iter_blocks.append(
-                f'<div class="card sub"><h4>{ititle}</h4>'
+                f'<div class="card sub" id="iter-{_esc(iid)}"><h4>{ititle}</h4>'
                 f'{_horizontal_table(it, iter_h_order)}'
                 f'{_field_table(it, ["testing_result", "bottlenecks", "recommendation"])}'
                 f'<h5>Тесты ({len(ts)})</h5>'
@@ -371,7 +492,7 @@ def build_report(run_dir: str) -> str:
             if gpreview else ""
         )
         gost_sections.append(
-            f'<div class="card"><h3>ГОСТ {title} {preview_link}</h3>'
+            f'<div class="card" id="gost-{_esc(gid)}"><h3>ГОСТ {title} {preview_link}</h3>'
             f'{_above_fields(g, GOST_ABOVE_FIELDS)}'
             f'{_horizontal_table(g, gost_h_order)}'
             f'{_field_table(g, ["testing_result", "bottlenecks", "recommendation"])}'
@@ -401,6 +522,23 @@ def build_report(run_dir: str) -> str:
             f"</div>"
         )
 
+    checks_html = _checks_section(checks)
+
+    # Панель навигации: разделы + подразделы ГОСТов по итерациям
+    sidebar_items = []
+    if checks_html:
+        sidebar_items.append('<a href="#checks">Проверки</a>')
+    sidebar_items.append('<a href="#gosts">ГОСТ отчеты</a>')
+    for g in gosts:
+        gid = g.get("gost_id", "")
+        gname = g.get("name", gid)
+        sidebar_items.append(f'<a class="sub-link" href="#gost-{_esc(gid)}">ГОСТ {_esc(gname)}</a>')
+        for it in iters_by_gost.get(gid, []):
+            iid = it.get("iteration_id", "")
+            sidebar_items.append(f'<a class="sub-link2" href="#iter-{_esc(iid)}">Итерация {_esc(iid)}</a>')
+    sidebar_items.append('<a href="#tasks">Задачи</a>')
+    sidebar_html = "".join(sidebar_items)
+
     now = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
     dir_name = os.path.basename(run_dir)
 
@@ -428,6 +566,31 @@ body {{
   background: var(--bg); color: var(--text); line-height: 1.5; padding: 20px;
 }}
 .container {{ max-width: 1700px; margin: 0 auto; }}
+.layout {{ display: flex; gap: 20px; align-items: flex-start; }}
+.sidebar {{
+  position: sticky;
+  top: 20px;
+  width: 200px;
+  flex-shrink: 0;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  box-shadow: 0 1px 3px rgba(0,0,0,.04);
+}}
+.sidebar-title {{ font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 8px; }}
+.sidebar a {{
+  display: block;
+  padding: 6px 10px;
+  margin-bottom: 2px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--text);
+}}
+.sidebar a:hover {{ background: var(--accent-soft); color: var(--accent); text-decoration: none; }}
+.sidebar a.sub-link {{ padding-left: 20px; font-size: 12.5px; color: var(--muted); }}
+.sidebar a.sub-link2 {{ padding-left: 34px; font-size: 12px; color: var(--muted); }}
+.content {{ flex: 1; min-width: 0; }}
 h1 {{ font-size: 26px; margin-bottom: 4px; }}
 h2 {{ font-size: 20px; margin: 28px 0 12px; color: var(--accent); border-bottom: 2px solid var(--border); padding-bottom: 6px; }}
 h3 {{ font-size: 17px; margin-bottom: 10px; }}
@@ -488,6 +651,32 @@ a {{ color: var(--accent); text-decoration: none; }}
 a:hover {{ text-decoration: underline; }}
 .multiline {{ white-space: pre-wrap; }}
 .empty {{ color: var(--muted); font-style: italic; }}
+.checks-total {{ font-size: 14px; font-weight: 600; margin-bottom: 10px; }}
+.checks-summary {{ max-width: 500px; margin-bottom: 16px; }}
+.checks-summary td.good {{ color: var(--green); font-weight: 700; }}
+.checks-summary td.bad {{ color: var(--red); font-weight: 700; }}
+.checks-total .good {{ color: var(--green); }}
+.checks-total .bad {{ color: var(--red); }}
+.checks-toolbar {{ margin-bottom: 10px; }}
+.btn-check {{
+  padding: 6px 14px;
+  margin-right: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--card);
+  color: var(--muted);
+  cursor: pointer;
+}}
+.btn-check:hover {{ border-color: var(--accent); color: var(--accent); }}
+.btn-check.active {{ background: var(--accent); border-color: var(--accent); color: #fff; }}
+.checks-table tbody tr.row-fail {{ background: #fef2f2; }}
+.checks-table tbody tr.row-fail td {{ border-top: 1px solid #fecaca; }}
+.checks-table td.status-cell {{ font-weight: 700; }}
+.checks-table td.status-cell:first-letter {{ text-transform: uppercase; }}
+.checks-table tbody tr.row-fail td.status-cell {{ color: var(--red); }}
+.checks-table tbody tr.row-ok td.status-cell {{ color: var(--green); }}
 .footer {{ margin-top: 30px; color: var(--muted); font-size: 12.5px; text-align: center; }}
 </style>
 </head>
@@ -496,14 +685,23 @@ a:hover {{ text-decoration: underline; }}
   <h1>Отчёт по ГОСТ отчетам</h1>
   <div class="subtitle">Папка: {_esc(dir_name)} · Сформирован: {_esc(now)}</div>
   <div class="stats">{stats}</div>
+  <div class="layout">
+    <nav class="sidebar">
+      <div class="sidebar-title">Разделы</div>
+      {sidebar_html}
+    </nav>
+    <div class="content">
+      {checks_html}
 
-  <h2>ГОСТ отчеты</h2>
-  {''.join(gost_sections) if gost_sections else '<p class="empty">Нет данных</p>'}
+      <h2 id="gosts">ГОСТ отчеты</h2>
+      {''.join(gost_sections) if gost_sections else '<p class="empty">Нет данных</p>'}
 
-  <h2>Задачи</h2>
-  {''.join(task_sections) if task_sections else '<p class="empty">Нет данных</p>'}
+      <h2 id="tasks">Задачи</h2>
+      {''.join(task_sections) if task_sections else '<p class="empty">Нет данных</p>'}
 
-  <div class="footer">Сформировано автоматически скриптом GOST Checker</div>
+      <div class="footer">Сформировано автоматически скриптом GOST Checker</div>
+    </div>
+  </div>
 </div>
 </body>
 </html>"""
