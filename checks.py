@@ -13,6 +13,8 @@ checks.csv (utf-8-sig) с результатами каждой проверки
   count_max     — агрегатная: количество строк в каждой группе по полю ≤ max
   all_not_empty — все поля строки заполнены (кроме id-поля и url)
   name          — значение — фамилия и имя (2+ кириллических слова)
+  link_type_count — агрегатная: у каждой задачи ровно count ссылок каждого
+                    типа из types (например, methodology/report/artifacts по 2)
 
 Пустое значение поля = нарушение (fail) для всех типов.
 """
@@ -199,6 +201,46 @@ def _check_count_max(entity: str, rows: list[dict], rule: dict) -> list[dict]:
                 else f"ГОСТов {count} > max {max_count}"
             ),
         })
+    return results
+
+
+def _check_link_type_count(
+    entity: str, rows: list[dict], rule: dict,
+) -> list[dict]:
+    """Проверка: у каждой задачи ровно count ссылок каждого типа из types.
+
+    Группирует строки по task_id, для каждого типа считает количество ссылок
+    с таким link_type и сравнивает с ожидаемым count.
+    Одна строка результата на (task_id, тип ссылки).
+    """
+    types = [str(t) for t in rule.get("types", [])]
+    expected = rule.get("count")
+    results: list[dict] = []
+
+    by_task: dict[str, list[dict]] = {}
+    for row in rows:
+        by_task.setdefault(row.get("task_id", ""), []).append(row)
+
+    for task_id, task_rows in by_task.items():
+        for link_type in types:
+            count = sum(
+                1 for r in task_rows
+                if str(r.get("link_type", "")).strip() == link_type
+            )
+            ok = expected is None or count == int(expected)
+            results.append({
+                "entity": entity,
+                "entity_id": task_id,
+                "field": "link_type",
+                "check_type": "link_type_count",
+                "expected": f"{link_type} = {expected}",
+                "actual": str(count),
+                "status": "ok" if ok else "fail",
+                "message": (
+                    f"ссылок {link_type}: {count} = {expected}" if ok
+                    else f"ссылок {link_type}: {count} ≠ {expected}"
+                ),
+            })
     return results
 
 
@@ -538,6 +580,9 @@ def run(run_dir: str) -> str | None:
             if rule.get("type") == "count_max":
                 results.extend(_add_desc(_check_count_max(entity, rows, rule), rule))
                 continue
+            if rule.get("type") == "link_type_count":
+                results.extend(_add_desc(_check_link_type_count(entity, rows, rule), rule))
+                continue
             if rule.get("type") == "all_not_empty":
                 results.extend(_add_desc(_check_all_not_empty(entity, rows, rule, id_field), rule))
                 continue
@@ -620,6 +665,8 @@ def _expected_str(rule: dict) -> str:
         return f"[{rule.get('from')}, {rule.get('to')}]"
     if check_type == "count_max":
         return f"≤ {rule.get('max')}"
+    if check_type == "link_type_count":
+        return f"{', '.join(str(t) for t in rule.get('types', []))} = {rule.get('count')}"
     if check_type == "name":
         return "фамилия и имя"
     return ""

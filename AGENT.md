@@ -102,7 +102,9 @@ summary (/gost/summary/) → ГОСТ (/admin/autoreport/gostreport/<id>/change/
 `has_iterations` — у ГОСТа есть 1 и более итераций (по iterations.csv),
 `gost_dates_match` — start_actual_date/end_actual_date ГОСТа совпадают с
 начальной и конечной датами итераций (min first_test_date / max last_test_date),
-`name` — значение — фамилия и имя (2+ кириллических слова, например «Иванов Иван»).
+`name` — значение — фамилия и имя (2+ кириллических слова, например «Иванов Иван»),
+`link_type_count` (types, count) — у каждой задачи ровно count ссылок каждого
+типа из types (например, methodology/report/artifacts по 2).
 
 Правила:
 - Проверяются все строки файла; `entity_id` берётся из id-поля

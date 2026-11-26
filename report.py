@@ -344,6 +344,12 @@ def _entity_url(entity: str, entity_id: str) -> str | None:
     return pattern.format(id=entity_id)
 
 
+def _summary_url() -> str:
+    """URL страницы summary с текущими параметрами фильтра из config.QUERY_PARAMS."""
+    params = "&".join(f"{k}={v}" for k, v in config.QUERY_PARAMS.items())
+    return f"{config.BASE_URL}/gost/summary/?{params}"
+
+
 def _checks_section(checks: list[dict]) -> str:
     """Секция «Проверки»: сводка по сущностям + таблица нарушений (fail)."""
     if not checks:
@@ -746,7 +752,9 @@ a:hover {{ text-decoration: underline; }}
     <div class="content">
       {checks_html}
 
-      <h2 id="gosts">ГОСТ отчеты</h2>
+      <h2 id="gosts">ГОСТ отчеты
+        <a class="preview-link" href="{_esc(_summary_url())}" target="_blank" rel="noopener">Сводка на портале</a>
+      </h2>
       {''.join(gost_sections) if gost_sections else '<p class="empty">Нет данных</p>'}
 
       <h2 id="tasks">Задачи</h2>
