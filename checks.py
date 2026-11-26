@@ -510,6 +510,43 @@ def _check_gost_dates_match(
     return results
 
 
+def _check_test_belongs(
+    entity: str, rows: list[dict], rule: dict, id_field: str,
+    iter_ids: set[str], gost_ids: set[str],
+) -> list[dict]:
+    """Проверка: тест из test_list относится к одному из ГОСТов и одной
+    из итераций (iteration_id/gost_id существуют в данных)."""
+    results: list[dict] = []
+    for row in rows:
+        tid = row.get(id_field, "")
+        iid = str(row.get("iteration_id", "")).strip()
+        gid = str(row.get("gost_id", "")).strip()
+        problems = []
+        if _is_empty(iid):
+            problems.append("нет iteration_id")
+        elif iid not in iter_ids:
+            problems.append(f"iteration_id {iid} не найден в итерациях")
+        if _is_empty(gid):
+            problems.append("нет gost_id")
+        elif gid not in gost_ids:
+            problems.append(f"gost_id {gid} не найден в ГОСТах")
+        ok = not problems
+        results.append({
+            "entity": entity,
+            "entity_id": tid,
+            "field": "iteration_id",
+            "check_type": "test_belongs",
+            "expected": "iteration_id и gost_id существуют",
+            "actual": f"iteration_id={iid}, gost_id={gid}",
+            "status": "ok" if ok else "fail",
+            "message": (
+                "тест относится к ГОСТу и итерации" if ok
+                else "; ".join(problems)
+            ),
+        })
+    return results
+
+
 def _load_config() -> dict | None:
     """Читает конфиг правил. Нет файла/ошибка → None."""
     if not os.path.exists(CONFIG_PATH):
@@ -579,6 +616,21 @@ def run(run_dir: str) -> str | None:
             for it in _load_csv(os.path.join(run_dir, "iterations.csv")):
                 iters_by_gost.setdefault(it.get("gost_id", ""), []).append(it)
 
+        # Существующие итерации и ГОСТы (для проверки test_list)
+        iter_ids: set[str] = set()
+        gost_ids: set[str] = set()
+        if entity == "test_list":
+            iter_ids = {
+                str(it.get("iteration_id", "")).strip()
+                for it in _load_csv(os.path.join(run_dir, "iterations.csv"))
+                if it.get("iteration_id")
+            }
+            gost_ids = {
+                str(g.get("gost_id", "")).strip()
+                for g in _load_csv(os.path.join(run_dir, "gosts.csv"))
+                if g.get("gost_id")
+            }
+
         for rule in rules:
             if rule.get("type") == "count_max":
                 results.extend(_add_desc(_check_count_max(entity, rows, rule), rule))
@@ -606,6 +658,9 @@ def run(run_dir: str) -> str | None:
                 continue
             if rule.get("type") == "gost_dates_match":
                 results.extend(_add_desc(_check_gost_dates_match(entity, rows, rule, id_field, iters_by_gost), rule))
+                continue
+            if rule.get("type") == "test_belongs":
+                results.extend(_add_desc(_check_test_belongs(entity, rows, rule, id_field, iter_ids, gost_ids), rule))
                 continue
             for row in rows:
                 entity_id = row.get(id_field, "")
@@ -672,6 +727,8 @@ def _expected_str(rule: dict) -> str:
         return f"{', '.join(str(t) for t in rule.get('types', []))} = {rule.get('count')}"
     if check_type == "name":
         return "фамилия и имя"
+    if check_type == "test_belongs":
+        return "iteration_id и gost_id существуют"
     return ""
 
 

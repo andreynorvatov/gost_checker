@@ -18,6 +18,9 @@
     {"field": "test_description", "type": "not_empty", "description": "Описание теста не пустое"},
     {"field": "test_results", "type": "not_empty", "description": "Результаты теста не пустые"}
   ],
+  "test_list": [
+    {"field": "iteration_id", "type": "test_belongs", "description": "Тест из списка относится к одному из ГОСТов и одной из итераций"}
+  ],
   "tasks": [
     {"field": "all", "type": "all_not_empty", "description": "Все поля задачи заполнены"},
     {"field": "curator", "type": "name", "description": "Поле «Лид» — фамилия и имя"}
